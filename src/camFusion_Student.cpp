@@ -6,8 +6,8 @@
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
 #include <opencv2/xfeatures2d.hpp>
-#include <thread>
 #include <set>
+#include <thread>
 
 #include "camFusion.hpp"
 #include "dataStructures.h"
@@ -155,10 +155,51 @@ void computeTTCCamera(std::vector<cv::KeyPoint> &kptsPrev,
   // ...
 }
 
+float calcXMeanLidar(vector<LidarPoint> lidarPoints) {
+  float sum = 0.0;
+  for (auto &p : lidarPoints) {
+    sum += p.x;
+  }
+  return sum / lidarPoints.size();
+}
+
 void computeTTCLidar(std::vector<LidarPoint> &lidarPointsPrev,
                      std::vector<LidarPoint> &lidarPointsCurr, double frameRate,
                      double &TTC) {
-  // ...
+  sort(lidarPointsPrev.begin(), lidarPointsPrev.end(),
+       [](LidarPoint &p1, LidarPoint &p2) { return p1.x < p2.x; });
+  sort(lidarPointsCurr.begin(), lidarPointsCurr.end(),
+       [](LidarPoint &p1, LidarPoint &p2) { return p1.x < p2.x; });
+
+  int lidarPointsCurr_Q1Idx = lidarPointsCurr.size() / 4;
+  int lidarPointsCurr_Q4Idx = lidarPointsCurr_Q1Idx * 3;
+  int lidarPointsPrev_Q1Idx = lidarPointsPrev.size() / 4;
+  int lidarPointsPRev_Q4Idx = lidarPointsPrev_Q1Idx * 3;
+
+  float lidarPointsCurrIqr = 1.5 * (lidarPointsCurr[lidarPointsCurr_Q4Idx].x -
+                                    lidarPointsCurr[lidarPointsCurr_Q1Idx].x);
+  float lidarPointsPrevIqr = 1.5 * (lidarPointsPrev[lidarPointsCurr_Q4Idx].x -
+                                    lidarPointsPrev[lidarPointsPrev_Q1Idx].x);
+
+  float currXMean = calcXMeanLidar(lidarPointsCurr);
+  float prevXMean = calcXMeanLidar(lidarPointsPrev);
+
+  float currClosestDist;
+  float prevClosestDist;
+  for (int i = 0; i < lidarPointsCurr_Q1Idx; ++i) {
+    if (currXMean - lidarPointsCurr[i].x < lidarPointsCurrIqr) {
+      currClosestDist = lidarPointsCurr[i].x;
+      break;
+    }
+  }
+  for (int i = 0; i < lidarPointsPrev_Q1Idx; ++i) {
+    if (prevXMean - lidarPointsPrev[i].x < lidarPointsPrevIqr) {
+      prevClosestDist = lidarPointsPrev[i].x;
+      break;
+    }
+  }
+
+  TTC = currClosestDist * frameRate / (prevClosestDist - currClosestDist);
 }
 
 void countMatchesBetweenFrames(vector<cv::DMatch> &matches,
@@ -181,8 +222,8 @@ void countMatchesBetweenFrames(vector<cv::DMatch> &matches,
 
 void iterateOverPrevBB(std::vector<cv::DMatch> &matches,
                        std::map<int, int> &bbBestMatches, DataFrame &prevFrame,
-                       DataFrame &currFrame, int prevBbIdx,
-                       set<int> &matchedBB, mutex &mtx) {
+                       DataFrame &currFrame, int prevBbIdx, set<int> &matchedBB,
+                       mutex &mtx) {
   map<int, int> countMatchesInBB;  // map<boxID, noOfKeypoints>
   mutex countMatchesmtx;
   vector<thread> threads;
@@ -246,10 +287,6 @@ void matchBoundingBoxes(std::vector<cv::DMatch> &matches,
     thread.join();
   }
 
-  for (auto match : bbBestMatches) {
-    cout << match.first << " " << match.second << endl;
-  }
-
   t = ((double)cv::getTickCount() - t) / cv::getTickFrequency();
-  cout << 1000 * t / 1.0 << " ms\n";
+  cout << "matching took: " << 1000 * t / 1.0 << " ms\n";
 }
