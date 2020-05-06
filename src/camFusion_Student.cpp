@@ -30,12 +30,11 @@ void clusterLidarWithROI(std::vector<BoundingBox> &boundingBoxes,
     // project Lidar point into camera
     Y = P_rect_xx * R_rect_xx * RT * X;
     cv::Point pt;
-    pt.x = Y.at<double>(0, 0) / Y.at<double>(0, 2);  // pixel coordinates
-    pt.y = Y.at<double>(1, 0) / Y.at<double>(0, 2);
+    pt.x = Y.at<double>(0, 0) / Y.at<double>(2, 0);  // pixel coordinates
+    pt.y = Y.at<double>(1, 0) / Y.at<double>(2, 0);
 
-    vector<vector<BoundingBox>::iterator>
-        enclosingBoxes;  // pointers to all bounding boxes which enclose the
-                         // current Lidar point
+    // pointers to all bounding boxes which enclose the current Lidar point
+    vector<vector<BoundingBox>::iterator> enclosingBoxes;
     for (vector<BoundingBox>::iterator it2 = boundingBoxes.begin();
          it2 != boundingBoxes.end(); ++it2) {
       // shrink current bounding box slightly to avoid having too many outlier
@@ -79,10 +78,10 @@ void show3DObjects(std::vector<BoundingBox> &boundingBoxes, cv::Size worldSize,
     for (auto it2 = it1->lidarPoints.begin(); it2 != it1->lidarPoints.end();
          ++it2) {
       // world coordinates
-      float xw =
-          (*it2).x;  // world position in m with x facing forward from sensor
-      float yw =
-          (*it2).y;  // world position in m with y facing left from sensor
+      // world position in m with x facing forward from sensor
+      float xw = (*it2).x;
+      // world position in m with y facing left from sensor
+      float yw = (*it2).y;
       xwmin = xwmin < xw ? xwmin : xw;
       ywmin = ywmin < yw ? ywmin : yw;
       ywmax = ywmax > yw ? ywmax : yw;
