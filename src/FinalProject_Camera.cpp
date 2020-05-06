@@ -192,10 +192,6 @@ int main(int argc, const char *argv[]) {
 
     cout << "#4 : CLUSTER LIDAR POINT CLOUD done" << endl;
 
-    // REMOVE THIS LINE BEFORE PROCEEDING WITH THE FINAL PROJECT
-    continue;  // skips directly to the next image without processing what comes
-               // beneath
-
     /* DETECT IMAGE KEYPOINTS */
 
     // convert current image to grayscale
@@ -206,26 +202,14 @@ int main(int argc, const char *argv[]) {
     // extract 2D keypoints from current image
     vector<cv::KeyPoint>
         keypoints;  // create empty feature list for current image
-    string detectorType = "SHITOMASI";
+    string detectorType = "FAST";
 
     if (detectorType.compare("SHITOMASI") == 0) {
-      detKeypointsShiTomasi(keypoints, imgGray, false);
+      detKeypointsShiTomasi(keypoints, imgGray, bVis);
+    } else if (detectorType.compare("HARRIS") == 0) {
+      detKeypointsHarris(keypoints, imgGray, bVis);
     } else {
-      //...
-    }
-
-    // optional : limit number of keypoints (helpful for debugging and learning)
-    bool bLimitKpts = false;
-    if (bLimitKpts) {
-      int maxKeypoints = 50;
-
-      if (detectorType.compare("SHITOMASI") ==
-          0) {  // there is no response info, so keep the first 50 as they are
-                // sorted in descending quality order
-        keypoints.erase(keypoints.begin() + maxKeypoints, keypoints.end());
-      }
-      cv::KeyPointsFilter::retainBest(keypoints, maxKeypoints);
-      cout << " NOTE: Keypoints have been limited!" << endl;
+      detKeypointsModern(keypoints, imgGray, detectorType, bVis);
     }
 
     // push keypoints and descriptor for current frame to end of data buffer
@@ -236,7 +220,7 @@ int main(int argc, const char *argv[]) {
     /* EXTRACT KEYPOINT DESCRIPTORS */
 
     cv::Mat descriptors;
-    string descriptorType = "BRISK";  // BRISK, BRIEF, ORB, FREAK, AKAZE, SIFT
+    string descriptorType = "ORB";  // BRISK, BRIEF, ORB, FREAK, AKAZE, SIFT
     descKeypoints((dataBuffer.end() - 1)->keypoints,
                   (dataBuffer.end() - 1)->cameraImg, descriptors,
                   descriptorType);
@@ -251,9 +235,10 @@ int main(int argc, const char *argv[]) {
       /* MATCH KEYPOINT DESCRIPTORS */
 
       vector<cv::DMatch> matches;
-      string matcherType = "MAT_BF";         // MAT_BF, MAT_FLANN
-      string descriptorType = "DES_BINARY";  // DES_BINARY, DES_HOG
-      string selectorType = "SEL_NN";        // SEL_NN, SEL_KNN
+      string matcherType = "MAT_BF";  // MAT_BF, MAT_FLANN
+      string descriptorDataType =
+          descriptorType.compare("SIFT") == 0 ? "DES_HOG" : "DES_BINARY";
+      string selectorType = "SEL_KNN";  // SEL_NN, SEL_KNN
 
       matchDescriptors((dataBuffer.end() - 2)->keypoints,
                        (dataBuffer.end() - 1)->keypoints,
@@ -263,6 +248,25 @@ int main(int argc, const char *argv[]) {
 
       // store matches in current data frame
       (dataBuffer.end() - 1)->kptMatches = matches;
+
+      bVis = true;
+      if (bVis) {
+        cv::Mat matchImg = ((dataBuffer.end() - 1)->cameraImg).clone();
+        cv::drawMatches((dataBuffer.end() - 2)->cameraImg,
+                        (dataBuffer.end() - 2)->keypoints,
+                        (dataBuffer.end() - 1)->cameraImg,
+                        (dataBuffer.end() - 1)->keypoints, matches, matchImg,
+                        cv::Scalar::all(-1), cv::Scalar::all(-1),
+                        vector<char>(),
+                        cv::DrawMatchesFlags::DRAW_RICH_KEYPOINTS);
+
+        string windowName = "Matching keypoints between two camera images";
+        cv::namedWindow(windowName, 7);
+        cv::imshow(windowName, matchImg);
+        cout << "Press key to continue to next image" << endl;
+        cv::waitKey(0);  // wait for key to be pressed
+      }
+      bVis = false;
 
       cout << "#7 : MATCH KEYPOINT DESCRIPTORS done" << endl;
 
