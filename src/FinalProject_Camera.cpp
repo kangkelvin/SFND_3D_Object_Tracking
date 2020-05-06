@@ -145,10 +145,12 @@ int main(int argc, const char *argv[]) {
 
     float confThreshold = 0.2;
     float nmsThreshold = 0.4;
+    bVis = false;
     detectObjects((dataBuffer.end() - 1)->cameraImg,
                   (dataBuffer.end() - 1)->boundingBoxes, confThreshold,
                   nmsThreshold, yoloBasePath, yoloClassesFile,
                   yoloModelConfiguration, yoloModelWeights, bVis);
+    bVis = false;
 
     cout << "#2 : DETECT & CLASSIFY OBJECTS done" << endl;
 
@@ -184,7 +186,7 @@ int main(int argc, const char *argv[]) {
                         P_rect_00, R_rect_00, RT);
 
     // Visualize 3D objects
-    bVis = true;
+    bVis = false;
     if (bVis)
       show3DObjects((dataBuffer.end() - 1)->boundingBoxes, cv::Size(4.0, 20.0),
                     cv::Size(1000, 1000), true);
@@ -249,7 +251,7 @@ int main(int argc, const char *argv[]) {
       // store matches in current data frame
       (dataBuffer.end() - 1)->kptMatches = matches;
 
-      bVis = true;
+      bVis = false;
       if (bVis) {
         cv::Mat matchImg = ((dataBuffer.end() - 1)->cameraImg).clone();
         cv::drawMatches((dataBuffer.end() - 2)->cameraImg,
@@ -277,7 +279,7 @@ int main(int argc, const char *argv[]) {
       /// current and previous frame (implement ->matchBoundingBoxes)
 
       // associate bounding boxes between current and
-      // previous frame using keypoint matches
+      // previous frame using keypoint matches <prev boxID, curr boxID>
       map<int, int> bbBestMatches;
       matchBoundingBoxes(matches, bbBestMatches, *(dataBuffer.end() - 2),
                          *(dataBuffer.end() - 1));

@@ -130,6 +130,11 @@ void detectObjects(cv::Mat& img, std::vector<BoundingBox>& bBoxes,
                 cv::Scalar(255, 255, 255), cv::FILLED);
       cv::putText(visImg, label, cv::Point(left, top), cv::FONT_ITALIC, 0.75,
                   cv::Scalar(0, 0, 0), 1);
+      // augment object with some key data
+      char str1[200], str2[200];
+      sprintf(str1, "id=%d", it->boxID);
+      putText(visImg, str1, cv::Point2f(left, top + 25), cv::FONT_ITALIC, 1,
+              cv::Scalar(0, 0, 255));
     }
 
     string windowName = "Object classification";

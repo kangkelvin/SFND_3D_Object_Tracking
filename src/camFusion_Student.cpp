@@ -1,9 +1,13 @@
 
 #include <algorithm>
 #include <iostream>
+#include <mutex>
 #include <numeric>
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
+#include <opencv2/xfeatures2d.hpp>
+#include <thread>
+#include <set>
 
 #include "camFusion.hpp"
 #include "dataStructures.h"
@@ -157,8 +161,95 @@ void computeTTCLidar(std::vector<LidarPoint> &lidarPointsPrev,
   // ...
 }
 
+void countMatchesBetweenFrames(vector<cv::DMatch> &matches,
+                               DataFrame &prevFrame, DataFrame &currFrame,
+                               int prevBbIdx, int currBbIdx,
+                               map<int, int> &countMatchesInBB, mutex &mtx) {
+  int countMatches = 0;
+
+  for (auto kpts_match : matches) {
+    if (prevFrame.boundingBoxes[prevBbIdx].roi.contains(
+            prevFrame.keypoints[kpts_match.queryIdx].pt) &&
+        currFrame.boundingBoxes[currBbIdx].roi.contains(
+            currFrame.keypoints[kpts_match.trainIdx].pt)) {
+      countMatches++;
+    }
+  }
+  const lock_guard<mutex> lck(mtx);
+  countMatchesInBB.emplace(pair<int, int>(currBbIdx, countMatches));
+}
+
+void iterateOverPrevBB(std::vector<cv::DMatch> &matches,
+                       std::map<int, int> &bbBestMatches, DataFrame &prevFrame,
+                       DataFrame &currFrame, int prevBbIdx,
+                       set<int> &matchedBB, mutex &mtx) {
+  map<int, int> countMatchesInBB;  // map<boxID, noOfKeypoints>
+  mutex countMatchesmtx;
+  vector<thread> threads;
+
+  for (int currBbIdx = 0; currBbIdx < currFrame.boundingBoxes.size();
+       ++currBbIdx) {
+    // if a BB has been matched before, skip it
+    if (matchedBB.find(currBbIdx) != matchedBB.end()) continue;
+    threads.emplace_back(thread(&countMatchesBetweenFrames, ref(matches),
+                                ref(prevFrame), ref(currFrame), prevBbIdx,
+                                currBbIdx, ref(countMatchesInBB),
+                                ref(countMatchesmtx)));
+  }
+
+  for (auto &thread : threads) {
+    thread.join();
+  }
+
+  // find BB with the most matched keypoints
+  auto bestBbMatch =
+      max_element(countMatchesInBB.begin(), countMatchesInBB.end(),
+                  [](pair<const int, int> &p1, pair<const int, int> &p2) {
+                    return p1.second < p2.second;
+                  });
+
+  // check if roi between two tracked BB has similar area size
+  float roi_similarity_threshold = 0.8;
+  float prevFrameRoiArea = prevFrame.boundingBoxes[prevBbIdx].roi.area();
+  float currFrameRoiArea =
+      currFrame.boundingBoxes[bestBbMatch->first].roi.area();
+
+  // if two BB are too different in size, skip
+  if (min(prevFrameRoiArea, currFrameRoiArea) /
+          max(prevFrameRoiArea, currFrameRoiArea) <
+      roi_similarity_threshold) {
+    return;
+  }
+
+  const lock_guard<mutex> lck(mtx);
+  bbBestMatches.emplace(pair<int, int>(prevBbIdx, bestBbMatch->first));
+  matchedBB.insert(bestBbMatch->first);
+}
+
 void matchBoundingBoxes(std::vector<cv::DMatch> &matches,
                         std::map<int, int> &bbBestMatches, DataFrame &prevFrame,
                         DataFrame &currFrame) {
-  // ...
+  double t = (double)cv::getTickCount();
+
+  mutex mtx;
+  vector<thread> threads;
+  set<int> matchedBB;
+
+  for (int prevBbIdx = 0; prevBbIdx < prevFrame.boundingBoxes.size();
+       ++prevBbIdx) {
+    threads.emplace_back(thread(
+        &iterateOverPrevBB, ref(matches), ref(bbBestMatches), ref(prevFrame),
+        ref(currFrame), prevBbIdx, ref(matchedBB), ref(mtx)));
+  }
+
+  for (auto &thread : threads) {
+    thread.join();
+  }
+
+  for (auto match : bbBestMatches) {
+    cout << match.first << " " << match.second << endl;
+  }
+
+  t = ((double)cv::getTickCount() - t) / cv::getTickFrequency();
+  cout << 1000 * t / 1.0 << " ms\n";
 }
