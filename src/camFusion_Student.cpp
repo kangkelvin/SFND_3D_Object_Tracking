@@ -1,4 +1,3 @@
-
 #include <algorithm>
 #include <iostream>
 #include <mutex>
@@ -143,7 +142,16 @@ void clusterKptMatchesWithROI(BoundingBox &boundingBox,
                               std::vector<cv::KeyPoint> &kptsPrev,
                               std::vector<cv::KeyPoint> &kptsCurr,
                               std::vector<cv::DMatch> &kptMatches) {
-  // ...
+  for (auto kpts_match : kptMatches) {
+    if (boundingBox.roi.contains(kptsCurr[kpts_match.trainIdx].pt) &&
+        boundingBox.roi.contains(kptsPrev[kpts_match.queryIdx].pt)) {
+      boundingBox.kptMatches.push_back(kpts_match);
+    }
+  }
+}
+
+float calcSquaredDist(cv::Point2f p1, cv::Point2f p2) {
+  return (p1.x - p2.x) * (p1.x - p2.x) + (p1.y - p2.y) * (p1.y - p2.y);
 }
 
 // Compute time-to-collision (TTC) based on keypoint correspondences in
@@ -152,15 +160,59 @@ void computeTTCCamera(std::vector<cv::KeyPoint> &kptsPrev,
                       std::vector<cv::KeyPoint> &kptsCurr,
                       std::vector<cv::DMatch> kptMatches, double frameRate,
                       double &TTC, cv::Mat *visImg) {
-  // ...
+  vector<float> distRatios;
+  for (int i = 0; i < kptMatches.size(); ++i) {
+    for (int j = i + 1; j < kptMatches.size(); ++j) {
+      float prevDist = calcSquaredDist(kptsPrev[kptMatches[i].queryIdx].pt,
+                                       kptsPrev[kptMatches[j].queryIdx].pt);
+      float currDist = calcSquaredDist(kptsCurr[kptMatches[i].trainIdx].pt,
+                                       kptsCurr[kptMatches[j].trainIdx].pt);
+      float distRatio = currDist / prevDist;
+      if (!isnan(distRatio)) distRatios.emplace_back(distRatio);
+    }
+  }
+
+  sort(distRatios.begin(), distRatios.end());
+
+  int distRatios_Q1Idx = distRatios.size() / 4;
+  int distRatios_Q4Idx = distRatios.size() * 3 / 4;
+
+  float distRatiosIqr =
+      1.5 * (distRatios[distRatios_Q4Idx] - distRatios[distRatios_Q1Idx]);
+
+  float distRatiosMedian;
+  int medianIdx = distRatios.size() / 2;
+
+  if (distRatios.size() % 2 == 0) {
+    distRatiosMedian = (distRatios[medianIdx] + distRatios[medianIdx + 1]) / 2;
+  } else {
+    distRatiosMedian = distRatios[medianIdx];
+  }
+
+  vector<float> distRatiosFiltered;
+  for (auto distRatio : distRatios) {
+    if (fabs(distRatio - distRatiosMedian) < distRatiosIqr)
+      distRatiosFiltered.push_back(distRatio);
+  }
+
+  float sum = 0;
+  for (auto distRatio : distRatiosFiltered) {
+    sum += distRatio;
+  }
+  float distRatiosFilteredMean = sum / distRatiosFiltered.size();
+
+  TTC = -1 / (1 - sqrt(distRatiosFilteredMean)) / frameRate;
 }
 
-float calcXMeanLidar(vector<LidarPoint> lidarPoints) {
-  float sum = 0.0;
-  for (auto &p : lidarPoints) {
-    sum += p.x;
+float calcXMedianLidar(vector<LidarPoint> lidarPoints) {
+  float median;
+  int medianIdx = lidarPoints.size() / 2;
+  if (lidarPoints.size() % 2 == 0) {
+    median = (lidarPoints[medianIdx].x + lidarPoints[medianIdx + 1].x) / 2;
+  } else {
+    median = lidarPoints[medianIdx].x;
   }
-  return sum / lidarPoints.size();
+  return median;
 }
 
 void computeTTCLidar(std::vector<LidarPoint> &lidarPointsPrev,
@@ -181,8 +233,8 @@ void computeTTCLidar(std::vector<LidarPoint> &lidarPointsPrev,
   float lidarPointsPrevIqr = 1.5 * (lidarPointsPrev[lidarPointsCurr_Q4Idx].x -
                                     lidarPointsPrev[lidarPointsPrev_Q1Idx].x);
 
-  float currXMean = calcXMeanLidar(lidarPointsCurr);
-  float prevXMean = calcXMeanLidar(lidarPointsPrev);
+  float currXMean = calcXMedianLidar(lidarPointsCurr);
+  float prevXMean = calcXMedianLidar(lidarPointsPrev);
 
   float currClosestDist;
   float prevClosestDist;
@@ -198,8 +250,9 @@ void computeTTCLidar(std::vector<LidarPoint> &lidarPointsPrev,
       break;
     }
   }
+  cout << prevClosestDist << " " << currClosestDist << endl;
 
-  TTC = currClosestDist * frameRate / (prevClosestDist - currClosestDist);
+  TTC = currClosestDist / frameRate / (prevClosestDist - currClosestDist);
 }
 
 void countMatchesBetweenFrames(vector<cv::DMatch> &matches,
@@ -270,8 +323,6 @@ void iterateOverPrevBB(std::vector<cv::DMatch> &matches,
 void matchBoundingBoxes(std::vector<cv::DMatch> &matches,
                         std::map<int, int> &bbBestMatches, DataFrame &prevFrame,
                         DataFrame &currFrame) {
-  double t = (double)cv::getTickCount();
-
   mutex mtx;
   vector<thread> threads;
   set<int> matchedBB;
@@ -286,7 +337,4 @@ void matchBoundingBoxes(std::vector<cv::DMatch> &matches,
   for (auto &thread : threads) {
     thread.join();
   }
-
-  t = ((double)cv::getTickCount() - t) / cv::getTickFrequency();
-  cout << "matching took: " << 1000 * t / 1.0 << " ms\n";
 }
