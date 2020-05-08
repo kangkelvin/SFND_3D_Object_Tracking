@@ -118,7 +118,7 @@ void show3DObjects(std::vector<BoundingBox> &boundingBoxes, cv::Size worldSize,
   }
 
   // plot distance markers
-  float lineSpacing = 2.0;  // gap between distance markers
+  float lineSpacing = 0.5;  // gap between distance markers
   int nMarkers = floor(worldSize.height / lineSpacing);
   for (size_t i = 0; i < nMarkers; ++i) {
     int y = (-(i * lineSpacing) * imageSize.height / worldSize.height) +
@@ -250,7 +250,7 @@ void computeTTCLidar(std::vector<LidarPoint> &lidarPointsPrev,
       break;
     }
   }
-  cout << prevClosestDist << " " << currClosestDist << endl;
+  // cout << prevClosestDist << " " << currClosestDist << " " << prevClosestDist - currClosestDist << endl;
 
   TTC = currClosestDist / frameRate / (prevClosestDist - currClosestDist);
 }
@@ -261,6 +261,7 @@ void countMatchesBetweenFrames(vector<cv::DMatch> &matches,
                                map<int, int> &countMatchesInBB, mutex &mtx) {
   int countMatches = 0;
 
+  // for each keypoint matches, check if it is inside both BB
   for (auto kpts_match : matches) {
     if (prevFrame.boundingBoxes[prevBbIdx].roi.contains(
             prevFrame.keypoints[kpts_match.queryIdx].pt) &&
@@ -277,9 +278,12 @@ void iterateOverPrevBB(std::vector<cv::DMatch> &matches,
                        std::map<int, int> &bbBestMatches, DataFrame &prevFrame,
                        DataFrame &currFrame, int prevBbIdx, set<int> &matchedBB,
                        mutex &mtx) {
-  map<int, int> countMatchesInBB;  // map<boxID, noOfKeypoints>
   mutex countMatchesmtx;
   vector<thread> threads;
+
+  // map of how many matches are found in candidate BB 
+  // map<boxID, noOfKeypointsMatches>
+  map<int, int> countMatchesInBB; 
 
   for (int currBbIdx = 0; currBbIdx < currFrame.boundingBoxes.size();
        ++currBbIdx) {
@@ -308,13 +312,14 @@ void iterateOverPrevBB(std::vector<cv::DMatch> &matches,
   float currFrameRoiArea =
       currFrame.boundingBoxes[bestBbMatch->first].roi.area();
 
-  // if two BB are too different in size, skip
+  // if two BB are too different in size, skip it
   if (min(prevFrameRoiArea, currFrameRoiArea) /
           max(prevFrameRoiArea, currFrameRoiArea) <
       roi_similarity_threshold) {
     return;
   }
 
+  // publish best matched BB
   const lock_guard<mutex> lck(mtx);
   bbBestMatches.emplace(pair<int, int>(prevBbIdx, bestBbMatch->first));
   matchedBB.insert(bestBbMatch->first);
@@ -325,6 +330,9 @@ void matchBoundingBoxes(std::vector<cv::DMatch> &matches,
                         DataFrame &currFrame) {
   mutex mtx;
   vector<thread> threads;
+
+  // keep track of which BB in curr frame has been matched, to prevent looking
+  // for mathces on this BB to reduce computation load
   set<int> matchedBB;
 
   for (int prevBbIdx = 0; prevBbIdx < prevFrame.boundingBoxes.size();

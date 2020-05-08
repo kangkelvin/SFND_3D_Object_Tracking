@@ -2,6 +2,7 @@
 __pycache__/
 .vscode/
 *.py[cod]
+dat/experiment-output/*.jpg
 
 # C extensions
 *.so
